@@ -182,6 +182,7 @@ func (s *session) handleKeepAliveRestored(evt *events.KeepAliveRestored) {
 
 // 处理客户端永久断开事件
 func (s *session) handlePermanentDisconnect(evt events.PermanentDisconnect) {
+	_ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventPermanentDisconnected, Phone: s.cli.Store.ID.User, Message: evt.PermanentDisconnectDescription()})
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PermanentDisconnect, user: %s, description:", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
 	s.sw.mu.Lock()
 	delete(s.sw.sessions, s.cli.Store.ID.User)
