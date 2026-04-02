@@ -1,14 +1,13 @@
 package whatsmeow
 
 import (
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gctx"
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/types/events"
+	"fmt"
 	"reflect"
 	"whatsm/internal/consts"
-	"whatsm/internal/model"
-	"whatsm/internal/service"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types/events"
 )
 
 type session struct {
@@ -20,6 +19,8 @@ type session struct {
 
 // 事件处理函数
 func (s *session) eventHandler(evt any) {
+	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "handle event: %T", evt)
+
 	switch v := evt.(type) {
 	case *events.QR:
 		s.handleQRCode(v)
@@ -39,16 +40,16 @@ func (s *session) eventHandler(evt any) {
 		s.handlePermanentDisconnect(v)
 	case *events.ManualLoginReconnect:
 		s.handleManualLoginReconnect(v)
-	//case *events.ConnectFailure:
-	//	s.handleConnectFailure(v)
-	//case *events.TemporaryBan:
-	//	s.handleTemporaryBan(v)
+	case *events.ConnectFailure:
+		s.handleConnectFailure(v)
+	// case *events.TemporaryBan:
+	// 	s.handleTemporaryBan(v)
 	case *events.LoggedOut:
 		s.handleLoggedOut(v)
 	//case *events.StreamReplaced:
 	//	s.handleStreamReplaced(v)
-	//case *events.ClientOutdated:
-	//	s.handleClientOutdated(v)
+	// case *events.ClientOutdated:
+	// 	s.handleClientOutdated(v)
 	//case *events.CATRefreshError:
 	//	s.handleCATRefreshError(v)
 	case *events.StreamError:
@@ -148,81 +149,112 @@ func (s *session) handleQRCode(evt *events.QR) {
 // 处理配对成功事件
 func (s *session) handlePairSuccess(evt *events.PairSuccess) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PairSuccess, deviceID: %s, businessName: %s, platform: %s", evt.ID, evt.BusinessName, evt.Platform)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusPairSuccess, s.cli.Store, "")
 }
 
 // 处理配对失败事件
 func (s *session) handlePairError(evt *events.PairError) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PairError, error: %v", evt.Error)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusPairFailed, s.cli.Store, evt.Error.Error())
 }
 
 // 处理手机未启用多设备时的扫描二维码事件
-func (s *session) handleQRScannedWithoutMultidevice(evt *events.QRScannedWithoutMultidevice) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: QRScannedWithoutMultidevice, please enable multi-device and rescan")
+func (s *session) handleQRScannedWithoutMultidevice(*events.QRScannedWithoutMultidevice) {
+	g.Log(consts.LogicLog).Debug(s.sw.ctx, "event: QRScannedWithoutMultidevice, please enable multi-device and rescan")
 }
 
 // 处理客户端成功连接事件
-func (s *session) handleConnected(_ *events.Connected) {
-	_ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventLogin, Phone: s.cli.Store.ID.User})
+func (s *session) handleConnected(evt *events.Connected) {
+	// _ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventLogin, Phone: s.cli.Store.ID.User})
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: Connected, user: %s", s.cli.Store.ID.ADString())
 	s.sw.mu.Lock()
 	s.sw.sessions[s.cli.Store.ID.User] = s
 	s.sw.mu.Unlock()
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: Connected, session added: %s", s.cli.Store.ID.ADString())
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusConnected, s.cli.Store, "")
 }
 
 // 处理心跳超时事件
 func (s *session) handleKeepAliveTimeout(evt *events.KeepAliveTimeout) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: KeepAliveTimeout, errorCount: %d, lastSuccess: %v", evt.ErrorCount, evt.LastSuccess)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusKeepAliveTimeout, s.cli.Store, fmt.Sprintf("errorCount: %d, lastSuccess: %v", evt.ErrorCount, evt.LastSuccess))
 }
 
 // 处理心跳恢复事件
-func (s *session) handleKeepAliveRestored(evt *events.KeepAliveRestored) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: KeepAliveRestored, heartbeat restored")
+func (s *session) handleKeepAliveRestored(*events.KeepAliveRestored) {
+	g.Log(consts.LogicLog).Debug(s.sw.ctx, "event: KeepAliveRestored, heartbeat restored")
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusKeepAliveRestored, s.cli.Store, "")
 }
 
 // 处理客户端永久断开事件
 func (s *session) handlePermanentDisconnect(evt events.PermanentDisconnect) {
-	_ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventPermanentDisconnected, Phone: s.cli.Store.ID.User, Message: evt.PermanentDisconnectDescription()})
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PermanentDisconnect, user: %s, description:", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
-	s.sw.mu.Lock()
-	delete(s.sw.sessions, s.cli.Store.ID.User)
-	s.sw.mu.Unlock()
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PermanentDisconnect, session removed: %s", s.cli.Store.ID.ADString())
+
+	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: PermanentDisconnect, user: %s, description: %s", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
+
+	switch t := evt.(type) {
+	case *events.LoggedOut:
+		s.handleLoggedOut(t)
+		return
+	case *events.StreamReplaced:
+		s.handleStreamReplaced(t)
+		return
+	case *events.ClientOutdated:
+		s.handleClientOutdated(t)
+		return
+	case *events.CATRefreshError:
+		s.handleCATRefreshError(t)
+		return
+	case *events.TemporaryBan:
+		s.handleTemporaryBan(t)
+		return
+	default:
+		s.sw.notify.NotifyEvent(s.sw.ctx, StatusPermanentDisconnected, s.cli.Store, evt.PermanentDisconnectDescription())
+		return
+	}
 }
 
 // 处理登出事件
 func (s *session) handleLoggedOut(evt *events.LoggedOut) {
-	_ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventLogout, Phone: s.cli.Store.ID.User, Message: evt.PermanentDisconnectDescription()})
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: LoggedOut, user: %s, description:", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
+	// _ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventLogout, Phone: s.cli.Store.ID.User, Message: evt.PermanentDisconnectDescription()})
+	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: LoggedOut, user: %s, description: %s", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
 	s.sw.mu.Lock()
 	delete(s.sw.sessions, s.cli.Store.ID.User)
 	s.sw.mu.Unlock()
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: LoggedOut, session removed: %s", s.cli.Store.ID.ADString())
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusLoggedOut, s.cli.Store, evt.PermanentDisconnectDescription())
 }
 
 // 处理流被替换事件
 func (s *session) handleStreamReplaced(evt *events.StreamReplaced) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: StreamReplaced, another stream has replaced the current one")
+	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: StreamReplaced, user: %s, description: %s", s.cli.Store.ID.ADString(), evt.PermanentDisconnectDescription())
+	// s.sw.mu.Lock()
+	// delete(s.sw.sessions, s.cli.Store.ID.User)
+	// s.sw.mu.Unlock()
+	// g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: StreamReplaced, session removed: %s", s.cli.Store.ID.ADString())
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusStreamReplaced, s.cli.Store, evt.PermanentDisconnectDescription())
 }
 
 // 处理手动登录重连事件
-func (s *session) handleManualLoginReconnect(evt *events.ManualLoginReconnect) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: ManualLoginReconnect, waiting for manual reconnect")
+func (s *session) handleManualLoginReconnect(*events.ManualLoginReconnect) {
+	g.Log(consts.LogicLog).Debug(s.sw.ctx, "event: ManualLoginReconnect, waiting for manual reconnect")
 }
 
 // 处理临时封禁事件
 func (s *session) handleTemporaryBan(evt *events.TemporaryBan) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: TemporaryBan, reason: %v, expire: %v", evt.Code, evt.Expire)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusTempBanned, s.cli.Store, fmt.Sprintf("reason: %v, expire: %v", evt.Code, evt.Expire))
 }
 
 // 处理连接失败事件
 func (s *session) handleConnectFailure(evt *events.ConnectFailure) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: ConnectFailure, error: %s", evt.Message)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusConnectFailed, s.cli.Store, fmt.Sprintf("reason: %s, error: %s", evt.Reason, evt.Message))
 }
 
 // 处理客户端过时事件
 func (s *session) handleClientOutdated(evt *events.ClientOutdated) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: ClientOutdated, client is outdated")
+	g.Log(consts.LogicLog).Debug(s.sw.ctx, "event: ClientOutdated, client is outdated")
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusClientOutdated, s.cli.Store, evt.PermanentDisconnectDescription())
 }
 
 // 处理CAT刷新错误事件
@@ -236,18 +268,20 @@ func (s *session) handleStreamError(evt *events.StreamError) {
 }
 
 // 处理客户端断开连接事件
-func (s *session) handleDisconnected(evt *events.Disconnected) {
-	_ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventDisconnected, Phone: s.cli.Store.ID.User})
+func (s *session) handleDisconnected(*events.Disconnected) {
+	// _ = service.Hook().Trigger(gctx.New(), &model.HookData{Event: consts.EventDisconnected, Phone: s.cli.Store.ID.User})
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: Disconnected, user: %s", s.cli.Store.ID.ADString())
 	s.sw.mu.Lock()
 	delete(s.sw.sessions, s.cli.Store.ID.User)
 	s.sw.mu.Unlock()
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: Disconnected, session removed: %s", s.cli.Store.ID.ADString())
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusDisconnected, s.cli.Store, "")
 }
 
 // 处理历史同步事件
-func (s *session) handleHistorySync(evt *events.HistorySync) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: HistorySync, syncing historical messages")
+func (s *session) handleHistorySync(*events.HistorySync) {
+	g.Log(consts.LogicLog).Debug(s.sw.ctx, "event: HistorySync, syncing historical messages")
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusHistorySync, s.cli.Store, "")
 }
 
 // 处理接收消息回执事件
@@ -310,11 +344,13 @@ func (s *session) handlePrivacySettings(evt *events.PrivacySettings) {
 // 处理离线同步预览事件
 func (s *session) handleOfflineSyncPreview(evt *events.OfflineSyncPreview) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: OfflineSyncPreview, total: %d", evt.Total)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusOfflineSyncPreview, s.cli.Store, fmt.Sprintf("total: %d", evt.Total))
 }
 
 // 处理离线同步完成事件
 func (s *session) handleOfflineSyncCompleted(evt *events.OfflineSyncCompleted) {
 	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "event: OfflineSyncCompleted, count: %d", evt.Count)
+	s.sw.notify.NotifyEvent(s.sw.ctx, StatusOfflineSyncFinished, s.cli.Store, fmt.Sprintf("count: %d", evt.Count))
 }
 
 // 处理媒体重试事件

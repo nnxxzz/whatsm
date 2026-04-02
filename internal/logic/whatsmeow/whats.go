@@ -3,16 +3,17 @@ package whatsmeow
 import (
 	"context"
 	"errors"
-	"github.com/gogf/gf/v2/errors/gcode"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/store/sqlstore"
-	"go.mau.fi/whatsmeow/types"
 	"sync"
 	"whatsm/internal/consts"
 	"whatsm/internal/model"
 	"whatsm/internal/service"
+
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 )
 
 type sWhats struct {
@@ -22,6 +23,7 @@ type sWhats struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	notify   *Notify
 }
 
 func init() {
@@ -70,18 +72,82 @@ func (s *sWhats) Init(ctx context.Context) error {
 		return gerror.Wrapf(err, "connect to db failed")
 	}
 	s.c = container
+
+	host := consts.NotifyHostDefault
+	path := consts.NotifyPathDefault
+	if hostCfg, err := g.Cfg().Get(ctx, "callback.host"); err == nil {
+		host = hostCfg.String()
+	}
+	if pathCfg, err := g.Cfg().Get(ctx, "callback.path"); err == nil {
+		path = pathCfg.String()
+	}
+	s.notify = NewNotify(host, path)
 	return nil
 }
 
+func (s *sWhats) RecoverSessions() {
+	g.Log(consts.LogicLog).Info(s.ctx, "recover sessions start")
+	allDevices, err := s.c.GetAllDevices(s.ctx)
+	if err != nil {
+		g.Log(consts.LogicLog).Errorf(s.ctx, "get all devices failed, err: %v", err)
+		return
+	}
+
+	if len(allDevices) == 0 {
+		g.Log(consts.LogicLog).Info(s.ctx, "no device found, skip recover")
+		return
+	}
+
+	devices := make(map[string]*store.Device, len(allDevices))
+	for _, device := range allDevices {
+		if dev, ok := devices[device.ID.User]; ok {
+			if dev.ID.Device < device.ID.Device {
+				devices[device.ID.User] = device
+			}
+		} else {
+			devices[device.ID.User] = device
+		}
+	}
+
+	for _, device := range devices {
+		if err := s.autoLogin(s.ctx, device); err != nil {
+			g.Log(consts.LogicLog).Errorf(s.ctx, "auto login failed for device %s, err: %v", device.ID.ADString(), err)
+		} else {
+			g.Log(consts.LogicLog).Infof(s.ctx, "auto login success for device %s", device.ID.ADString())
+		}
+	}
+
+	g.Log(consts.LogicLog).Info(s.ctx, "recover sessions done")
+}
+
 func (s *sWhats) Logout(ctx context.Context, phone string) error {
+	g.Log(consts.LogicLog).Debugf(ctx, "user %s logout", phone)
 	if _, ok := s.sessions[phone]; !ok {
 		return nil
 	}
 	return s.sessions[phone].cli.Logout(ctx)
 }
 
+func (s *sWhats) getDevice(ctx context.Context, phone string) (*store.Device, bool) {
+	allDevices, err := s.c.GetAllDevices(ctx)
+	if err != nil {
+		g.Log(consts.LogicLog).Errorf(ctx, "get all devices failed, err: %v", err)
+		return nil, false
+	}
+
+	for i := len(allDevices) - 1; i >= 0; i-- {
+		device := allDevices[i]
+		if device.ID.User == phone {
+			g.Log(consts.LogicLog).Debugf(ctx, "get device, jid: %s, lid: %s, businessName: %s, pushName: %s", device.ID.ADString(), device.LID.ADString(), device.BusinessName, device.PushName)
+			return device, true
+		}
+	}
+	return nil, false
+}
+
 // create new device&session
 func (s *sWhats) LoginPair(ctx context.Context, in *model.LoginPairInput) (*model.LoginPairOutput, error) {
+	g.Log(consts.LogicLog).Debugf(ctx, "client loginPair, phone: %s, proxy: %s", in.Phone, in.Proxy)
 	limit := consts.MaxUserDefault
 	if maxUser, err := g.Cfg().Get(ctx, consts.MaxUserConfigKey); err == nil {
 		if maxUser.Int() != 0 {
@@ -91,13 +157,19 @@ func (s *sWhats) LoginPair(ctx context.Context, in *model.LoginPairInput) (*mode
 	if len(s.sessions) >= limit {
 		return nil, gerror.NewCode(gcode.New(1001, "login users limit", nil))
 	}
-	jid := types.NewADJID(in.Phone, 0, 1)
-	st, err := s.c.GetDevice(ctx, jid)
-	if err != nil {
-		return nil, gerror.Wrapf(err, "device not found")
-	}
-	if st == nil {
-		st = s.c.NewDevice()
+	// jid := types.NewADJID(in.Phone, 0, 9)
+	// g.Log(consts.LogicLog).Debugf(ctx, "login jid: %s", jid.ADString())
+	// st, err := s.c.GetDevice(ctx, jid)
+	// if err != nil {
+	// 	g.Log(consts.LogicLog).Errorf(ctx, "get device failed, err: %v", err)
+	// 	return nil, gerror.Wrapf(err, "device not found")
+	// }
+
+	st, ok := s.getDevice(ctx, in.Phone)
+	if !ok {
+		g.Log(consts.LogicLog).Debugf(ctx, "device not found, create new device")
+		st = s.c.NewDeviceWithProxy(in.Proxy)
+		// g.Log(consts.LogicLog).Debugf(ctx, "new device, jid: %s, lid: %s, businessName: %s, pushName: %s", st.ID.ADString(), st.LID.ADString(), st.BusinessName, consts.PushNameDefault)
 	}
 	client := whatsmeow.NewClient(st, s.l)
 	if in.Proxy != "" {
@@ -117,6 +189,7 @@ func (s *sWhats) LoginPair(ctx context.Context, in *model.LoginPairInput) (*mode
 
 	if client.Store.ID != nil {
 		if err := client.Connect(); err != nil {
+			g.Log(consts.LogicLog).Errorf(ctx, "client connect to whats server failed, err: %v", err)
 			return nil, gerror.Wrapf(err, "client connect to whats server failed")
 		}
 		return &model.LoginPairOutput{}, nil
@@ -151,6 +224,34 @@ func (s *sWhats) LoginPair(ctx context.Context, in *model.LoginPairInput) (*mode
 	return &model.LoginPairOutput{Code: code, QrCode: qrCode.Code}, nil
 }
 
-//func (s *sWhats) login(ctx context.Context, st *store.Device, proxy ...string) error {
-//
-//}
+func (s *sWhats) autoLogin(ctx context.Context, device *store.Device) error {
+	if device == nil {
+		g.Log(consts.LogicLog).Errorf(ctx, "auto login device error, device is null")
+		return gerror.Newf("device is null")
+	}
+
+	g.Log(consts.LogicLog).Debugf(ctx, "auto login device, jid: %s, lid: %s, businessName: %s, pushName: %s", device.ID.ADString(), device.LID.ADString(), device.BusinessName, device.PushName)
+
+	client := whatsmeow.NewClient(device, s.l)
+	if device.Proxy != "" {
+		if err := client.SetProxyAddress(device.Proxy); err != nil {
+			return gerror.Wrapf(err, "set proxy address failed")
+		}
+	}
+	sess := &session{cli: client, sw: s}
+	autoMarkMessage := false
+	if mark, err := g.Cfg().Get(ctx, consts.AutoMarkMessageKey); err == nil {
+		autoMarkMessage = mark.Bool()
+	}
+	if autoMarkMessage {
+		sess.hooks = []EventHook{HookMarkMessageAdRead}
+	}
+	client.AddEventHandler(sess.eventHandler)
+
+	if err := client.Connect(); err != nil {
+		g.Log(consts.LogicLog).Errorf(ctx, "client connect to whats server failed, err: %v", err)
+		return gerror.Wrapf(err, "client connect to whats server failed")
+	}
+	return nil
+
+}

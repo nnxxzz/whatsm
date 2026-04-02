@@ -6,12 +6,15 @@ gfcli:
     name: "whatsm"
     arch: "amd64"
     system: "linux"
+    # system: "windows"
     cgo: true
     packSrc: "manifest/config"
     path: "./bin"
-    version:  "v1.0.0"
+    version:  "v1.0.1"
 
   docker:
     build: "-a amd64 -s linux -p temp -ew"
+    # build: "-a amd64 -s windows -p temp -ew"
     tagPrefixes:
       - my.image.pub/my-app
+  

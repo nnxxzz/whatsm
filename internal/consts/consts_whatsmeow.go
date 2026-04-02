@@ -24,4 +24,7 @@ const (
 	UploadFileImage = 1
 	UploadFileVideo = 2
 	UploadFileAudio = 3
+
+	NotifyHostDefault = ""
+	NotifyPathDefault = ""
 )

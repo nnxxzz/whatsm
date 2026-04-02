@@ -3,6 +3,7 @@ module whatsm
 go 1.24.0
 
 require (
+	github.com/gabriel-vasile/mimetype v1.4.13
 	github.com/gogf/gf/v2 v2.7.1
 	github.com/mattn/go-sqlite3 v1.14.33
 	go.mau.fi/whatsmeow v0.0.0-20260129212019-7787ab952245
@@ -18,7 +19,6 @@ require (
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -44,3 +44,5 @@ require (
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace go.mau.fi/whatsmeow => github.com/nnxxzz/whatsmeow v0.0.0-20260402044529-bad7d7933837

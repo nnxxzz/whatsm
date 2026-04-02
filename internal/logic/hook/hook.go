@@ -2,11 +2,13 @@ package hook
 
 import (
 	"context"
+	"whatsm/internal/consts"
+	"whatsm/internal/model"
+	"whatsm/internal/service"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gclient"
-	"whatsm/internal/model"
-	"whatsm/internal/service"
 )
 
 type sHook struct {
@@ -30,7 +32,8 @@ func (h *sHook) Trigger(ctx context.Context, data *model.HookData) error {
 	}
 	urls := gv.Strings()
 	for _, url := range urls {
-		if _, err := h.c.Post(ctx, url, data); err != nil {
+		g.Log(consts.LogicLog).Debugf(ctx, "trigger hook event: %d, phone: %s, message: %s, callback url: %s", data.Event, data.Phone, data.Message, url)
+		if _, err := h.c.ContentJson().Post(ctx, url, data); err != nil {
 			return gerror.Wrapf(err, "call back url: %s failed", url)
 		}
 	}

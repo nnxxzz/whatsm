@@ -28,6 +28,7 @@ type (
 		Logout(ctx context.Context, phone string) error
 		// create new device&session
 		LoginPair(ctx context.Context, in *model.LoginPairInput) (*model.LoginPairOutput, error)
+		RecoverSessions()
 	}
 )
 
