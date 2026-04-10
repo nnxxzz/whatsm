@@ -11,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/gcmd"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -61,6 +63,17 @@ func (s *sWhats) Init(ctx context.Context) error {
 	s.l = &logger{ctx: ctx}
 	dialect := consts.DbDialectDefault
 	address := consts.DbAddressDefault
+
+	parser, _ := gcmd.Parse(g.MapStrBool{
+		"c,config": true,
+	})
+
+	configPath := parser.GetOpt("c").String()
+	if configPath != "" {
+		g.Cfg().GetAdapter().(*gcfg.AdapterFile).SetFileName(configPath)
+		g.Log(consts.LogicLog).Infof(ctx, "config file set to: %s", configPath)
+	}
+
 	if dialectCfg, err := g.Cfg().Get(ctx, consts.DbDialectConfigKey); err == nil {
 		dialect = dialectCfg.String()
 	}
@@ -81,6 +94,7 @@ func (s *sWhats) Init(ctx context.Context) error {
 	if pathCfg, err := g.Cfg().Get(ctx, "callback.path"); err == nil {
 		path = pathCfg.String()
 	}
+	g.Log(consts.LogicLog).Infof(ctx, "notify callback set to: %s%s", host, path)
 	s.notify = NewNotify(host, path)
 	return nil
 }

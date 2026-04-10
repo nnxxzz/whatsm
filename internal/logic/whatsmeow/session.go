@@ -19,7 +19,7 @@ type session struct {
 
 // 事件处理函数
 func (s *session) eventHandler(evt any) {
-	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "handle event: %T", evt)
+	g.Log(consts.LogicLog).Debugf(s.sw.ctx, "handle event type: %T", evt)
 
 	switch v := evt.(type) {
 	case *events.QR:

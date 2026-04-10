@@ -129,7 +129,7 @@ func (n *Notify) NotifyEvent(ctx context.Context, status Status, dev *store.Devi
 	}
 
 	jsonStr, _ := json.Marshal(msg)
-	g.Log(consts.LogicLog).Debugf(ctx, "notify event: %s", jsonStr)
+	g.Log(consts.LogicLog).Debugf(ctx, "notify event to client: %s", jsonStr)
 
 	response, err := g.Client().ContentJson().Post(ctx, n.host+n.path, msg)
 	if err != nil {
